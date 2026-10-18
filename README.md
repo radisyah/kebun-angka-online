@@ -16,9 +16,14 @@ Room Master ────┼─ polling ─ /api/room ───┤
 ## Alur
 - **Buat Ruangan** (pembuat = Pemain 1 & pemilik) atau **Jadi Room Master** (hanya memantau, tidak bermain). Teman bergabung dengan kode / *Salin Tautan* (`?room=KODE`).
 - 2–4 pemain (dulu wajib tepat 4). Pemain menekan **SIAP**; pemilik (Room Master bila ada, kalau tidak Pemain 1) menekan **MULAI**.
-- Saat bermain, tiap pemain mengirim skor, gelombang, dan **cuplikan keadaan game** tiap ±1 detik. Room Master menggambar ulang layar
-  para pemain dari cuplikan itu (gerakan di antara dua cuplikan diperkirakan), jadi tampilannya agak kurang halus dibanding versi LAN
-  yang mengirim ±12 cuplikan/detik. Room Master bisa **Hentikan**.
+- Saat bermain, tiap pemain mengirim skor & gelombang tiap ±1 detik, dan **layar gamenya dikirim sebagai video langsung 60 fps ke Room Master lewat WebRTC**
+  (peer-to-peer; `canvas.captureStream(60)`, ±667×387, ≤2,5 Mbps, mempertahankan fps). Server hanya menukar sinyal SDP sekali per koneksi
+  (aksi `sig`, ±2 perintah Redis), videonya tidak lewat Vercel/Redis. Lencana di tiap kotak (mis. "VIDEO 60 FPS") dan di header
+  menunjukkan fps video yang benar-benar diterima & ditampilkan.
+- **Cadangan otomatis:** bila WebRTC tidak tersambung (jaringan memblokir P2P), kotak itu kembali memakai cuplikan ±1 dtk + perkiraan gerakan
+  (digambar 60 fps tapi data posisi hanya 1×/detik; lencana menampilkan "Cuplikan"). Pemain mencoba menawarkan ulang tiap 9 dtk (maks. 8×).
+  Cuplikan berhenti dikirim selama video tersambung (hemat Redis). Untuk jaringan ketat (sekolah/seluler) tambahkan server TURN di `ICE.iceServers` (`public/online.js`).
+Room Master bisa **Hentikan**.
 - Semua selesai → papan skor. Pemilik menekan **Main lagi** (kembali ke lobi, seed baru).
 - Pemain keluar / terputus > 45 dtk tanpa statistik / dihentikan Master → dihitung gugur dengan skor terakhir. Batas keras satu ronde 30 menit.
 - Muat ulang halaman saat bermain = dianggap keluar dari ronde itu. Di lobi, papan skor, dan layar Room Master, sesi tersambung kembali otomatis.

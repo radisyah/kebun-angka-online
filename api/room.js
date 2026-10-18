@@ -16,6 +16,7 @@ const fail = (status, msg) => { const e = new Error(msg); e.status = status; ret
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const rid = n => crypto.randomBytes(n).toString('hex');
 const cleanName = s => String(s || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 12);
+const sigKey = (c, from, to) => 'sig:' + c + ':' + from + '>' + to, SIG_TTL = 120, SIG_MAX = 24000;
 const roomKey = c => 'room:' + c, presKey = (c, id) => 'pres:' + c + ':' + id, statKey = (c, id) => 'stat:' + c + ':' + id;
 const parse = s => { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } };
 
@@ -247,7 +248,25 @@ async function actStats(b) {
     const snap = core.cleanSnap(b.snap); if (snap) live.snap = snap;
     await store.cmd(['SET', statKey(code, p.id), JSON.stringify(live), 'EX', STAT_TTL]);
   }
-  return { status: room.status, gameNo: room.gameNo, v: room.v, serverNow: now };
+  const out = { status: room.status, gameNo: room.gameNo, v: room.v, serverNow: now };
+  if (b.sg) { const m = parse(await store.cmd(['GET', sigKey(code, 'm', p.id)])); if (m) out.sig = m; }   // jawaban WebRTC dari Room Master
+  return out;
+}
+/* Sinyal WebRTC (video langsung pemain -> Room Master). Satu slot per arah; pesan terbaru menimpa yang lama.
+   Pemain hanya boleh mengirim ke Master ('m'), Master hanya ke pemain ('0'..'3'). Video sendiri TIDAK lewat server. */
+async function actSig(b) {
+  const code = normCode(b.code), store = getStore();
+  const room = parse(await store.cmd(['GET', roomKey(code)]));
+  if (!room) throw fail(404, 'Ruangan tidak ditemukan atau sudah kedaluwarsa.');
+  const seat = seatOf(room, b.token);
+  const from = seat === 'master' ? 'm' : seat, to = String(b.to);
+  if (from === 'm' ? !SEATS.includes(to) : to !== 'm') throw fail(400, 'Tujuan sinyal tidak valid.');
+  if (!room.master || room.status !== 'playing') throw fail(409, 'Tidak ada pertandingan yang berjalan.');
+  const m = b.msg || {};
+  if ((m.type !== 'offer' && m.type !== 'answer') || typeof m.sdp !== 'string' || m.sdp.length > SIG_MAX) throw fail(400, 'Pesan sinyal tidak valid.');
+  const clean = { id: String(m.id || '').slice(0, 24), oid: String(m.oid || '').slice(0, 24), g: Number(m.g) | 0, type: m.type, sdp: m.sdp };
+  await store.cmd(['SET', sigKey(code, from, to), JSON.stringify(clean), 'EX', SIG_TTL]);
+  return {};
 }
 async function actOver(b) {
   const code = normCode(b.code), now = Date.now();
@@ -265,7 +284,7 @@ async function actState(q) {
     ['GET', roomKey(code)],
     ['MGET'].concat(['m'].concat(SEATS).map(i => presKey(code, i))),
     ['MGET'].concat(SEATS.map(i => statKey(code, i)))
-  ]);
+  ].concat(String(q.sg) === '1' ? [['MGET'].concat(SEATS.map(i => sigKey(code, i, 'm')))] : []));
   if (!first[0]) throw fail(404, 'Ruangan tidak ditemukan atau sudah kedaluwarsa.');
   let room = JSON.parse(first[0]);
   const seat = seatOf(room, token);
@@ -277,8 +296,9 @@ async function actState(q) {
     await withRoom(code, r => { tick(r, stats, now); });
     room = JSON.parse(await store.cmd(['GET', roomKey(code)]));
   }
-  if (room.v === have && !(seat === 'master' && room.status === 'playing')) return { unchanged: true, v: room.v, serverNow: now, online: pres };
-  return { view: viewFor(room, seat, now, pres, stats) };
+  let sig; if (seat === 'master' && first[3]) { sig = {}; SEATS.forEach((id, i) => { const m = parse(first[3][i]); if (m) sig[id] = m; }); }
+  if (room.v === have && !(seat === 'master' && room.status === 'playing')) return { unchanged: true, v: room.v, serverNow: now, online: pres, sig };
+  return { view: viewFor(room, seat, now, pres, stats), sig };
 }
 
 /* ---------- handler HTTP (Vercel) ---------- */
@@ -294,7 +314,7 @@ module.exports = async function handler(req, res) {
     if (req.method === 'GET') out = await actState(req.query || {});
     else if (req.method === 'POST') {
       const b = readBody(req);
-      const acts = { create: actCreate, join: actJoin, ready: actReady, start: actStart, stop: actStop, again: actAgain, leave: actLeave, stats: actStats, over: actOver };
+      const acts = { create: actCreate, join: actJoin, ready: actReady, start: actStart, stop: actStop, again: actAgain, leave: actLeave, stats: actStats, over: actOver, sig: actSig };
       if (!acts[b.action]) throw fail(400, 'Aksi tidak dikenal.');
       out = await acts[b.action](b);
     } else throw fail(405, 'Metode tidak didukung.');

@@ -145,6 +145,26 @@ const fin = (score, extra) => Object.assign({ score, wave: 10, win: true }, extr
     const u = await state(h.code, h.token, v.view.v); assert(u.unchanged && u.v === v.view.v && u.online);
   });
 
+  await T('sinyal WebRTC: pemain -> master (offer), master -> pemain (answer); tujuan salah ditolak', async () => {
+    const m = await post('create', { name: 'M', role: 'master' }), a = await post('join', { code: m.code, name: 'A' }), b = await post('join', { code: m.code, name: 'B' });
+    await post('ready', { code: m.code, token: a.token, ready: true }); await post('ready', { code: m.code, token: b.token, ready: true });
+    assert.strictEqual((await post('sig', { code: m.code, token: a.token, to: 'm', msg: { id: 'x', type: 'offer', sdp: 'v=0' } })).http, 409);   // belum main
+    assert((await post('start', { code: m.code, token: m.token })).ok);
+    const g = (await state(m.code, m.token)).view.gameNo;
+    assert((await post('sig', { code: m.code, token: a.token, to: 'm', msg: { id: 'o1', g, type: 'offer', sdp: 'v=0 offer' } })).ok);
+    assert.strictEqual((await post('sig', { code: m.code, token: a.token, to: '1', msg: { id: 'o2', type: 'offer', sdp: 'x' } })).http, 400);   // pemain tidak boleh ke pemain
+    assert.strictEqual((await post('sig', { code: m.code, token: m.token, to: 'm', msg: { id: 'o3', type: 'answer', sdp: 'x' } })).http, 400);
+    assert.strictEqual((await post('sig', { code: m.code, token: a.token, to: 'm', msg: { id: 'o4', type: 'offer', sdp: 'x'.repeat(30000) } })).http, 400);
+    const s0 = await api('GET', null, { code: m.code, token: m.token, v: 0, sg: 0 }); assert(!s0.sig);
+    const s1 = await api('GET', null, { code: m.code, token: m.token, v: 0, sg: 1 });
+    assert(s1.sig && s1.sig['0'].id === 'o1' && s1.sig['0'].type === 'offer' && s1.sig['0'].g === g && !s1.sig['1']);
+    assert((await post('sig', { code: m.code, token: m.token, to: '0', msg: { id: 'a1', oid: 'o1', g, type: 'answer', sdp: 'v=0 answer' } })).ok);
+    const st = await post('stats', { code: m.code, token: a.token, stats: { score: 1, wave: 1 }, sg: 1 });
+    assert(st.ok && st.sig && st.sig.oid === 'o1' && st.sig.type === 'answer');
+    assert(!(await post('stats', { code: m.code, token: a.token, stats: { score: 2, wave: 1 }, sg: 0 })).sig);
+    assert((await post('stats', { code: m.code, token: b.token, stats: { score: 2, wave: 1 }, sg: 1 })).sig === undefined);   // jawaban hanya untuk pemain tujuan
+  });
+
   console.log('\n' + pass + ' tes lolos'); srv.close();
   setTimeout(() => process.exit(process.exitCode || 0), 50);
 })();

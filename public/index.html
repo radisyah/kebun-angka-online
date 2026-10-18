@@ -4699,7 +4699,8 @@
         flex: 1;
         min-height: 0;
       }
-      .hw canvas {
+      .hw canvas,
+      .hw video {
         position: absolute;
         inset: 0;
         width: 100%;
@@ -4731,6 +4732,12 @@
       #lrk td.s { color: #ffe27a; font-weight: 800; }
       #lrk tr.me td.n { text-decoration: underline; }
       #hu b { color: #ffe27a; letter-spacing: 0.2em; }
+      #hfps { font: 700 14px "Oswald", monospace; font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; padding: 4px 10px; border-radius: 99px; border: 2px solid var(--dark); background: rgba(0,0,0,.45); color: #7dff8a; }
+      #hfps.mid { color: #ffd45a; }
+      #hfps.bad { color: #ff7a6a; }
+      .hb .hf { font: 700 11px "Oswald", monospace; font-style: normal; padding: 1px 8px; border-radius: 99px; background: rgba(0,0,0,.45); color: #cfd8c4; margin: 0 8px; }
+      .hb .hf.ok { color: #7dff8a; } .hb .hf.mid { color: #ffd45a; } .hb .hf.bad { color: #ff7a6a; }
+      .hw video { background: #0e130b; }
       #olt { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 9999; background: #000d; color: #fff; border-radius: 99px; padding: 8px 16px; font: 14px system-ui, sans-serif; max-width: 90vw; display: none; }
     </style>
 
@@ -4768,6 +4775,7 @@
         <h1>Kebun Angka · Room Master</h1>
         <div id="hs"></div>
         <div id="hu"></div>
+        <div id="hfps" title="Frame per detik tayangan Room Master">-- FPS</div>
         <button class="lbtn" id="hgo" disabled>MULAI</button>
         <button class="lbtn sm" id="hlv">Keluar</button>
       </div>
