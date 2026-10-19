@@ -515,30 +515,70 @@
     }
   };
 
-  /* ---------- video langsung 60 fps: pemain -> Room Master lewat WebRTC (peer-to-peer) ----------
+  /* ---------- video langsung 360p 30 fps: pemain -> Room Master lewat WebRTC (peer-to-peer) ----------
    Server (Vercel/Redis) hanya dipakai untuk bertukar sinyal SDP satu kali; videonya tidak lewat server.
    Bila WebRTC gagal (jaringan memblokir P2P tanpa TURN), Room Master otomatis memakai cuplikan seperti sebelumnya.
-   Untuk jaringan yang ketat, tambahkan server TURN ke ICE.iceServers. */
-  const ICE = {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-    ],
-  };
+   Jaringan ketat (sekolah/seluler) dilayani server TURN Metered lewat /api/turn. */
+  /* Video Room Master: 360p @ 30 fps (hemat CPU/jaringan, 4 video sekaligus tetap mulus) */
+  const VID_H = 360, VID_FPS = 30, VID_BPS = 8e5;
+  const STUN_ONLY = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ];
+  /* Server TURN Metered diambil lewat /api/turn (kunci API tersimpan di env Vercel). Di-cache 5 menit. */
+  let iceCache = null,
+    iceAt = 0,
+    icePromise = null;
+  async function getIce() {
+    if (iceCache && Date.now() - iceAt < 5 * 60 * 1000) return iceCache;
+    if (!icePromise)
+      icePromise = (async () => {
+        try {
+          const ctl = new AbortController(),
+            to = setTimeout(() => ctl.abort(), 4000);
+          const r = await fetch(
+            "/api/turn?" +
+              new URLSearchParams({ code: ON.code, token: ON.token }),
+            { cache: "no-store", signal: ctl.signal }
+          );
+          clearTimeout(to);
+          const j = await r.json();
+          if (j.ok && Array.isArray(j.iceServers) && j.iceServers.length) {
+            iceCache = { iceServers: j.iceServers };
+            iceAt = Date.now();
+            if (!j.turn) console.warn("TURN Metered belum aktif: hanya STUN.");
+            return iceCache;
+          }
+        } catch (e) {}
+        return { iceServers: STUN_ONLY }; // gagal: coba lagi pada tawaran berikutnya
+      })().finally(() => {
+        icePromise = null;
+      });
+    return icePromise;
+  }
   const rid = () => Math.random().toString(36).slice(2, 12);
   function iceDone(pc, ms) {
+    // selesai bila pengumpulan kandidat lengkap, atau (setelah relay TURN ada) 400 ms kemudian, atau batas waktu
     return new Promise((res) => {
       if (pc.iceGatheringState === "complete") return res();
-      const t = setTimeout(done, ms || 2500);
+      let relayT = 0;
+      const t = setTimeout(done, ms || 4000);
       function done() {
         clearTimeout(t);
+        clearTimeout(relayT);
         pc.removeEventListener("icegatheringstatechange", chk);
+        pc.removeEventListener("icecandidate", cand);
         res();
       }
       function chk() {
         if (pc.iceGatheringState === "complete") done();
       }
+      function cand(e) {
+        if (e.candidate && e.candidate.type === "relay" && !relayT)
+          relayT = setTimeout(done, 400);
+      }
       pc.addEventListener("icegatheringstatechange", chk);
+      pc.addEventListener("icecandidate", cand);
     });
   }
   /* -- sisi pemain -- */
@@ -567,10 +607,12 @@
     closeStream();
     pAt = Date.now();
     pTries++;
-    const pc = (ppc = new RTCPeerConnection(ICE)),
+    const ice = await getIce();
+    if (!ON || !playing) return;
+    const pc = (ppc = new RTCPeerConnection(ice)),
       oid = (pOid = rid());
     try {
-      const stream = cv.captureStream(60);
+      const stream = cv.captureStream(VID_FPS);
       stream.getVideoTracks().forEach((t) => {
         try {
           t.contentHint = "motion";
@@ -578,13 +620,14 @@
         pc.addTrack(t, stream);
       });
       try {
-        // minta 60 fps & bitrate cukup; jaga fps bila jaringan lambat (resolusi yang turun dulu)
+        // 360p @ 30 fps: resolusi dibatasi, fps dipertahankan (resolusi yang turun lebih dulu bila jaringan lambat)
         const sd = pc.getSenders()[0],
           pr = sd.getParameters();
         if (!pr.encodings || !pr.encodings.length) pr.encodings = [{}];
-        pr.encodings[0].maxFramerate = 60;
-        pr.encodings[0].maxBitrate = 2.5e6;
-        pr.encodings[0].scaleResolutionDownBy = 1.5; // ±667×387: cukup untuk kotak Master & ringan di CPU pemain pr.degradationPreference = 'maintain-framerate';
+        pr.encodings[0].maxFramerate = VID_FPS;
+        pr.encodings[0].maxBitrate = VID_BPS;
+        pr.encodings[0].scaleResolutionDownBy = Math.max(1, cv.height / VID_H);
+        pr.degradationPreference = "maintain-framerate";
         await sd.setParameters(pr);
       } catch (e) {}
       await pc.setLocalDescription(await pc.createOffer());
@@ -664,7 +707,7 @@
   async function answerOffer(k, m) {
     if (!window.RTCPeerConnection) return;
     closePeer(k);
-    const pc = new RTCPeerConnection(ICE);
+    const pc = new RTCPeerConnection(await getIce());
     MP[k] = { pc, oid: m.id };
     const c = HC[k];
     if (!c) return;
@@ -732,7 +775,7 @@
         t0 = now;
         setT(c.hf, "VIDEO " + c.fps + " FPS");
         c.hf.className =
-          "hf " + (c.fps >= 55 ? "ok" : c.fps >= 30 ? "mid" : "bad");
+          "hf " + (c.fps >= 26 ? "ok" : c.fps >= 15 ? "mid" : "bad");
       }
       v.requestVideoFrameCallback(cb);
     };
@@ -1069,9 +1112,9 @@
       handleErr(e);
     }
   };
-  /* Tayangan Room Master digambar 60 fps (diatur dengan pewaktu akumulator supaya tetap rata-rata 60 di layar 120/144 Hz)
+  /* Tayangan cadangan Room Master digambar 30 fps (diatur dengan pewaktu akumulator supaya tetap rata-rata 30 di layar 120/144 Hz)
    dan fps yang benar-benar tergambar ditampilkan di #hfps. */
-  const HFPS = 60,
+  const HFPS = 30,
     HSTEP = 1000 / HFPS;
   let hnext = 0,
     fpsT = 0,
@@ -1108,7 +1151,7 @@
       fpsEl = fpsEl || $$("hfps");
       if (fpsEl) {
         setT(fpsEl, (lv.length ? "VIDEO " : "") + f + " FPS");
-        fpsEl.className = f >= 55 ? "ok" : f >= 30 ? "mid" : "bad";
+        fpsEl.className = f >= 26 ? "ok" : f >= 15 ? "mid" : "bad";
       }
     }
     requestAnimationFrame(hostRender);

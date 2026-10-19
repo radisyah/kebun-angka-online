@@ -2,20 +2,20 @@
 /* Server lokal untuk pengembangan & tes: node dev-server.js  →  http://localhost:3000
    Memakai penyimpanan memori kecuali variabel Redis diset. */
 const http = require('http'), fs = require('fs'), path = require('path'), url = require('url');
-const handler = require('./api/room.js');
+const HANDLERS = { '/api/room': require('./api/room.js'), '/api/turn': require('./api/turn.js') };
 const PUB = path.join(__dirname, 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
 function start(port) {
   const srv = http.createServer((req, res) => {
     const u = url.parse(req.url, true);
-    if (u.pathname === '/api/room') {
+    if (HANDLERS[u.pathname]) {
       let raw = ''; req.on('data', c => raw += c);
       req.on('end', () => {
         try { req.body = raw ? JSON.parse(raw) : undefined; } catch (e) { req.body = undefined; }
         req.query = u.query;
         res.status = c => { res.statusCode = c; return res; };
         res.json = o => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(o)); };
-        handler(req, res);
+        HANDLERS[u.pathname](req, res);
       });
       return;
     }

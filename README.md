@@ -16,13 +16,14 @@ Room Master ────┼─ polling ─ /api/room ───┤
 ## Alur
 - **Buat Ruangan** (pembuat = Pemain 1 & pemilik) atau **Jadi Room Master** (hanya memantau, tidak bermain). Teman bergabung dengan kode / *Salin Tautan* (`?room=KODE`).
 - 2–4 pemain (dulu wajib tepat 4). Pemain menekan **SIAP**; pemilik (Room Master bila ada, kalau tidak Pemain 1) menekan **MULAI**.
-- Saat bermain, tiap pemain mengirim skor & gelombang tiap ±1 detik, dan **layar gamenya dikirim sebagai video langsung 60 fps ke Room Master lewat WebRTC**
-  (peer-to-peer; `canvas.captureStream(60)`, ±667×387, ≤2,5 Mbps, mempertahankan fps). Server hanya menukar sinyal SDP sekali per koneksi
-  (aksi `sig`, ±2 perintah Redis), videonya tidak lewat Vercel/Redis. Lencana di tiap kotak (mis. "VIDEO 60 FPS") dan di header
-  menunjukkan fps video yang benar-benar diterima & ditampilkan.
-- **Cadangan otomatis:** bila WebRTC tidak tersambung (jaringan memblokir P2P), kotak itu kembali memakai cuplikan ±1 dtk + perkiraan gerakan
-  (digambar 60 fps tapi data posisi hanya 1×/detik; lencana menampilkan "Cuplikan"). Pemain mencoba menawarkan ulang tiap 9 dtk (maks. 8×).
-  Cuplikan berhenti dikirim selama video tersambung (hemat Redis). Untuk jaringan ketat (sekolah/seluler) tambahkan server TURN di `ICE.iceServers` (`public/online.js`).
+- Saat bermain, tiap pemain mengirim skor & gelombang tiap ±1 detik, dan **layar gamenya dikirim sebagai video langsung 360p / 30 fps ke Room Master lewat WebRTC**
+  (`canvas.captureStream(30)`, tinggi dibatasi 360 px, ≤800 kbps, `maintain-framerate` → bila jaringan lambat, resolusi yang turun dulu, bukan fps). Server hanya menukar sinyal SDP sekali per koneksi
+  (aksi `sig`), videonya tidak lewat Vercel/Redis. Lencana di tiap kotak (mis. "VIDEO 30 FPS") menunjukkan fps video yang benar-benar diterima.
+- **Server TURN (Metered)** supaya video sampai dari jaringan apa pun (sekolah, seluler/CGNAT, kantor): klien meminta daftar ICE ke `/api/turn`
+  (hanya anggota ruangan yang sah), fungsi itu mengambil kredensial dari Metered memakai API key yang tersimpan di environment Vercel (tidak pernah dikirim ke browser), lalu di-cache 5 menit.
+  Bila Metered belum diisi / gagal, otomatis memakai STUN saja.
+- **Cadangan otomatis:** bila WebRTC tetap tidak tersambung, kotak itu kembali memakai cuplikan ±1 dtk + perkiraan gerakan
+  (lencana "Cuplikan"). Pemain mencoba menawarkan ulang tiap 9 dtk (maks. 8×).
 Room Master bisa **Hentikan**.
 - Semua selesai → papan skor. Pemilik menekan **Main lagi** (kembali ke lobi, seed baru).
 - Pemain keluar / terputus > 45 dtk tanpa statistik / dihentikan Master → dihitung gugur dengan skor terakhir. Batas keras satu ronde 30 menit.
@@ -38,10 +39,19 @@ Room Master bisa **Hentikan**.
 
 Bila Redis belum terhubung, API membalas: *"Database belum dikonfigurasi…"*.
 
+## Mengisi TURN Metered di Vercel
+1. Daftar di [metered.ca](https://www.metered.ca) → **Dashboard → TURN Server** (paket gratis ±500 MB/bulan; 4 video 360p ≈ ≤3,2 Mbps hanya bila lewat relay — kebanyakan jaringan memakai P2P langsung dan tidak memakai kuota).
+2. Catat nama aplikasi (domain `NAMA.metered.live`) dan buat **API Key** (menu *TURN Server → Create API Key*).
+3. Vercel → proyek → **Settings → Environment Variables**, tambahkan (Production + Preview):
+   - `METERED_DOMAIN` = `NAMA.metered.live` (atau cukup `NAMA`)
+   - `METERED_API_KEY` = API key tadi
+   - opsional `METERED_REGION` = `asia` / `global`
+4. **Redeploy**. Cek: buka `/api/turn?code=KODE&token=TOKEN` dari sesi yang sah → `"turn": true`.
+
 ## Lokal
 ```bash
 node dev-server.js        # http://localhost:3000 (penyimpanan memori, hanya untuk pengembangan)
-npm test                  # 17 tes API: lewat memori DAN lewat jalur Redis REST (server tiruan format Upstash)
+npm test                  # 18 tes API + 4 tes /api/turn: lewat memori DAN lewat jalur Redis REST (server tiruan format Upstash)
 python3 test/e2e.py       # 3 browser Chromium: Room Master + 2 pemain (pip install playwright && playwright install chromium)
 ```
 

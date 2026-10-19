@@ -4,6 +4,9 @@
     "api/room.js": {
       "maxDuration": 10,
       "includeFiles": "public/game-core.js"
+    },
+    "api/turn.js": {
+      "maxDuration": 10
     }
   }
 }
