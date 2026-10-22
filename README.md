@@ -16,6 +16,7 @@ Room Master ────┼─ polling ─ /api/room ───┤
 ## Alur
 - **Buat Ruangan** (pembuat = Pemain 1 & pemilik) atau **Jadi Room Master** (hanya memantau, tidak bermain). Teman bergabung dengan kode / *Salin Tautan* (`?room=KODE`).
 - 2–4 pemain (dulu wajib tepat 4). Pemain menekan **SIAP**; pemilik (Room Master bila ada, kalau tidak Pemain 1) menekan **MULAI**.
+- **Render paralel di Room Master:** tiap layar pemain digambar oleh Web Worker + OffscreenCanvas sendiri (`public/render-worker.js`), jadi 4 layar memakai beberapa inti CPU/GPU laptop sekaligus. Berkas ini dibuat otomatis dari kode gambar di `index.html`: **jalankan `python3 tools/build-render-worker.py` setiap kali kode gambar di `index.html` diubah.** Browser tanpa dukungan OffscreenCanvas otomatis memakai cara lama (satu thread).
 - **Mode hemat data (default, `USE_VIDEO=false` di `online.js`):** pemain tidak mengirim video, hanya keadaan game (JSON terkompresi, ±12×/dtk, ±5–10 KB/dtk) lewat WebRTC DataChannel tanpa retransmisi; Room Master menggambar ulang layar tiap pemain sendiri di 60 fps. Isi `USE_VIDEO=true` untuk kembali ke video 360p di bawah.
 - Saat bermain, tiap pemain mengirim skor & gelombang tiap ±1 detik, dan **layar gamenya dikirim sebagai video langsung 360p / 24 fps ke Room Master lewat WebRTC**
   (`canvas.captureStream(24)`, tinggi dibatasi 360 px, ≤800 kbps, `maintain-framerate` → bila jaringan lambat, resolusi yang turun dulu, bukan fps). Server hanya menukar sinyal SDP sekali per koneksi

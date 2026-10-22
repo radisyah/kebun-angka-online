@@ -524,6 +524,12 @@
   /* MODE HEMAT DATA (default): pemain TIDAK mengirim video, hanya keadaan game (JSON terkompresi, ±5–10 KB/dtk)
      lewat WebRTC DataChannel; Room Master menggambar ulang sendiri di 60 fps. USE_VIDEO=true -> kembali ke video 360p lama. */
   const USE_VIDEO = false, SNAP_HZ = 12;
+  /* Room Master: tiap layar pemain digambar oleh Web Worker + OffscreenCanvas sendiri (render-worker.js) -> memakai beberapa inti CPU
+     & GPU laptop secara paralel, sehingga 60 fps tetap lancar. Bila browser tidak mendukung / worker gagal: otomatis pakai cara lama. */
+  const CAN_WORKER =
+    !USE_VIDEO && typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined" &&
+    typeof HTMLCanvasElement !== "undefined" && "transferControlToOffscreen" in HTMLCanvasElement.prototype;
+  const WCAP = [60, 60, 45, 30];
   const FPS_OK = 21, FPS_MID = 14; // ambang lencana hijau / kuning (24 fps target)
   const STUN_ONLY = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -1027,8 +1033,28 @@
     HW = 700,
     HH = Math.round(H * HS),
     CAP = 1.5;
+  function mkCx(cvs) {
+    const cx = cvs.getContext("2d", { alpha: false }); // tanpa transparansi: komposit lebih ringan
+    cx.fillStyle = "#0e130b";
+    cx.fillRect(0, 0, cvs.width, cvs.height);
+    return cx;
+  }
+  function workerFail(k) {
+    const c = HC[k];
+    if (!c || !c.w) return;
+    try { c.w.terminate(); } catch (e) {}
+    c.w = null;
+    const old = c.d.querySelector("canvas"), nw = document.createElement("canvas");
+    nw.width = Math.round(W * (c.hs || HS));
+    nw.height = Math.round(H * (c.hs || HS));
+    old.replaceWith(nw); // canvas lama sudah diserahkan ke worker; pakai canvas baru di thread utama
+    c.cx = mkCx(nw);
+    c.nx = undefined;
+    if (HV[k]) HV[k].pt = 0;
+  }
   function buildHost() {
     const gr = $$("hg");
+    for (const k in HC) if (HC[k].w) try { HC[k].w.terminate(); } catch (e) {}
     gr.innerHTML = "";
     for (let k = 0; k < 4; k++) {
       const d = document.createElement("div");
@@ -1038,10 +1064,19 @@
       const cvs = d.querySelector("canvas");
       cvs.width = HW;
       cvs.height = HH;
-      const cx = cvs.getContext("2d", { alpha: false }); // tanpa transparansi: komposit lebih ringan
-      cx.fillStyle = "#0e130b";
-      cx.fillRect(0, 0, HW, HH);
+      let cx = null, w = null;
+      if (CAN_WORKER)
+        try {
+          const off = cvs.transferControlToOffscreen();
+          w = new Worker("render-worker.js");
+          w.postMessage({ t: "init", canvas: off, scale: HS }, [off]);
+        } catch (e) { w = null; }
+      if (!w) cx = mkCx(cvs);
       HC[k] = {
+        w,
+        sent: null,
+        wf: 0,
+        wlv: 0,
         lab: d.querySelector("b"),
         chip: d.querySelector(".hb span"),
         hf: d.querySelector(".hf"),
@@ -1055,6 +1090,15 @@
         fps: 0,
         wf: 0,
       };
+      if (w) {
+        w.onmessage = (e) => {
+          const m = e.data, c = HC[k];
+          if (!c) return;
+          if (m.t === "fps") { c.wf = m.f; c.wlv = m.lv; }
+          else if (m.t === "err") workerFail(k);
+        };
+        w.onerror = () => workerFail(k);
+      }
       d.onclick = () => zoomCell(ZK === k ? -1 : k);
       gr.appendChild(d);
     }
@@ -1072,20 +1116,24 @@
       const c = HC[i];
       c.d.classList.toggle("zoom", i === k);
       setT(c.zb, i === k ? "✕ Tutup" : "🔍 Zoom");
+      if (c.w) c.w.postMessage({ t: "pause", v: k >= 0 && i !== k }); // layar yang tertutup berhenti digambar
     }
     requestAnimationFrame(() => {
       for (let i = 0; i < 4; i++) {
         const c = HC[i],
-          cs = c.cx.canvas;
-        let hs = hsc;
+          cs = c.d.querySelector("canvas");
+        let hs = c.w ? HS : hsc;
         if (i === k) {
           const r = cs.getBoundingClientRect(),
             dpr = window.devicePixelRatio || 1;
           hs = Math.min(1.5, Math.max(hsc, Math.min(r.width / W, r.height / H) * dpr));
         }
         c.hs = hs;
-        cs.width = Math.round(W * hs);
-        cs.height = Math.round(H * hs);
+        if (c.w) c.w.postMessage({ t: "size", scale: hs });
+        else {
+          cs.width = Math.round(W * hs);
+          cs.height = Math.round(H * hs);
+        }
         if (HV[i]) HV[i].pt = 0; // paksa gambar ulang
       }
     });
@@ -1116,6 +1164,11 @@
       delete HV[k];
       const c = HC[k];
       if (!c) continue;
+      if (c.w) {
+        c.sent = null;
+        c.w.postMessage({ t: "clear" });
+        continue;
+      }
       c.cx.setTransform(1, 0, 0, 1, 0, 0);
       c.cx.fillStyle = "#0e130b";
       c.cx.fillRect(0, 0, c.cx.canvas.width, c.cx.canvas.height);
@@ -1279,7 +1332,7 @@
     hz = LV[lvl][1];
     for (let k = 0; k < 4; k++) {
       const c = HC[k];
-      if (!c || k === ZK || c.hs === hsc) continue;
+      if (!c || c.w || k === ZK || c.hs === hsc) continue;
       c.hs = hsc;
       c.cx.canvas.width = Math.round(W * hsc);
       c.cx.canvas.height = Math.round(H * hsc);
@@ -1295,6 +1348,13 @@
     for (let k = 0; k < 4; k++) {
       const h = HV[k],
         c = HC[k];
+      if (c && c.w) {
+        if (h && c.sent !== h) {
+          c.sent = h;
+          c.w.postMessage({ t: "snap", s: h.snap }); // worker menggambar sendiri di 60 fps
+        }
+        continue;
+      }
       if (!h || !c || c.live || (zoomed && ZK !== k)) continue;
       act++;
       if (c.nx === undefined || now - c.nx > 250) c.nx = now + (k * step) / 4; // awal / setelah tab disembunyikan: sebar waktunya
@@ -1347,10 +1407,17 @@
           null,
           lv.map((c) => c.fps)
         ); // ada video langsung: tampilkan fps video terendah
+      let top = tgt, q = lvl;
+      const wk = [0, 1, 2, 3].filter((k) => HC[k] && HC[k].w && HV[k] && HC[k].wf >= 0 && (!zoomed || ZK === k));
+      if (wk.length) {
+        f = Math.min.apply(null, wk.map((k) => HC[k].wf));
+        q = Math.max.apply(null, wk.map((k) => HC[k].wlv));
+        top = Math.min.apply(null, wk.map((k) => WCAP[HC[k].wlv || 0]));
+      }
       fpsEl = fpsEl || $$("hfps");
       if (fpsEl) {
-        setT(fpsEl, (lv.length ? "VIDEO " : "") + f + " FPS" + (lvl ? " ·hemat" + lvl : ""));
-        const r = lv.length ? f / VID_FPS : f / tgt;
+        setT(fpsEl, (lv.length ? "VIDEO " : "") + f + " FPS" + (q ? " ·hemat" + q : ""));
+        const r = lv.length ? f / VID_FPS : f / top;
         fpsEl.className = r >= 0.85 ? "ok" : r >= 0.6 ? "mid" : "bad";
       }
     }
