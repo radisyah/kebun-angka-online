@@ -1,4 +1,4 @@
-/* Klien online Kebun Angka — dimuat setelah game utama di index.html.
+/* Klien online FloraBite — dimuat setelah game utama di index.html.
    Pola sama dengan angry-birds-online / war-of-kingdom: kode ruangan 5 karakter, token sesi di localStorage,
    polling ke /api/room (Vercel Function + Upstash Redis). Gelombang zombie sama untuk semua pemain (seed dari server);
    permainan berjalan lokal di tiap perangkat. Room Master melihat layar para pemain lewat cuplikan (snapshot) ±1 dtk sekali. */
@@ -521,6 +521,9 @@
    Jaringan ketat (sekolah/seluler) dilayani server TURN Metered lewat /api/turn. */
   /* Video Room Master: 360p @ 24 fps, DIKUNCI (hemat CPU/jaringan, 4 video sekaligus tetap mulus) */
   const VID_H = 360, VID_FPS = 24, VID_BPS = 8e5;
+  /* MODE HEMAT DATA (default): pemain TIDAK mengirim video, hanya keadaan game (JSON terkompresi, ±5–10 KB/dtk)
+     lewat WebRTC DataChannel; Room Master menggambar ulang sendiri di 60 fps. USE_VIDEO=true -> kembali ke video 360p lama. */
+  const USE_VIDEO = false, SNAP_HZ = 12;
   const FPS_OK = 21, FPS_MID = 14; // ambang lencana hijau / kuning (24 fps target)
   const STUN_ONLY = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -588,8 +591,71 @@
     pSeen = "",
     pAt = 0,
     pTries = 0;
-  const pConn = () => !!ppc && ppc.connectionState === "connected";
+  let pdc = null,
+    dcT = 0,
+    dcSeq = 0;
+  const pConn = () =>
+    !!ppc &&
+    ppc.connectionState === "connected" &&
+    (USE_VIDEO || (!!pdc && pdc.readyState === "open"));
+  async function pack(obj) {
+    const u = new TextEncoder().encode(JSON.stringify(obj));
+    let z = null;
+    if (window.CompressionStream && u.length > 300)
+      try {
+        const cs = new CompressionStream("deflate-raw"),
+          w = cs.writable.getWriter();
+        w.write(u);
+        w.close();
+        z = new Uint8Array(await new Response(cs.readable).arrayBuffer());
+      } catch (e) {}
+    const b = z || u,
+      o = new Uint8Array(b.length + 1);
+    o[0] = z ? 1 : 0;
+    o.set(b, 1);
+    return o;
+  }
+  async function unpack(buf) {
+    const u = new Uint8Array(buf);
+    let b = u.subarray(1);
+    if (u[0] === 1) {
+      const ds = new DecompressionStream("deflate-raw"),
+        w = ds.writable.getWriter();
+      w.write(b);
+      w.close();
+      b = new Uint8Array(await new Response(ds.readable).arrayBuffer());
+    }
+    return JSON.parse(new TextDecoder().decode(b));
+  }
+  function stopDC() {
+    clearInterval(dcT);
+    dcT = 0;
+    pdc = null;
+  }
+  function openDC(pc) {
+    stopDC();
+    // tidak berurutan & tanpa pengiriman ulang: data lama dibuang, tidak pernah menumpuk di jaringan lemah
+    const ch = (pdc = pc.createDataChannel("state", {
+      ordered: false,
+      maxRetransmits: 0,
+    }));
+    ch.binaryType = "arraybuffer";
+    ch.onopen = () => {
+      clearInterval(dcT);
+      dcT = setInterval(async () => {
+        if (!playing || !S || pdc !== ch || ch.readyState !== "open") return;
+        if (ch.bufferedAmount > 12000) return; // jaringan macet: lewati frame ini
+        try {
+          ch.send(await pack({ q: ++dcSeq, s: mk() }));
+        } catch (e) {}
+      }, 1000 / SNAP_HZ);
+    };
+    ch.onclose = () => {
+      if (pdc === ch) stopDC();
+    };
+  }
   function closeStream() {
+    stopDC();
     if (ppc) {
       try {
         ppc.close();
@@ -600,7 +666,7 @@
   async function startStream() {
     if (
       !window.RTCPeerConnection ||
-      !cv.captureStream ||
+      (USE_VIDEO && !cv.captureStream) ||
       !ON ||
       ON.side !== "player"
     )
@@ -613,7 +679,8 @@
     const pc = (ppc = new RTCPeerConnection(ice)),
       oid = (pOid = rid());
     try {
-      const stream = cv.captureStream(VID_FPS);
+      if (!USE_VIDEO) openDC(pc);
+      const stream = USE_VIDEO ? cv.captureStream(VID_FPS) : new MediaStream();
       stream.getVideoTracks().forEach((t) => {
         try {
           t.contentHint = "motion";
@@ -672,7 +739,7 @@
     !!V &&
     V.side === "master" &&
     V.status === "playing" &&
-    V.players.some((p, k) => !p.done && !p.left && !(HC[k] && HC[k].live));
+    V.players.some((p, k) => !p.done && !p.left && !(HC[k] && (HC[k].live || HC[k].dc)));
   function closePeer(k) {
     const m = MP[k];
     if (m) {
@@ -684,6 +751,8 @@
     const c = HC[k];
     if (c) {
       c.live = false;
+      c.dc = false;
+      c.dseq = -1;
       c.fps = 0;
       if (c.vid) {
         c.vid.srcObject = null;
@@ -712,6 +781,7 @@
     MP[k] = { pc, oid: m.id };
     const c = HC[k];
     if (!c) return;
+    pc.ondatachannel = (e) => onDC(k, c, pc, e.channel);
     pc.ontrack = (e) => {
       c.vid.srcObject = e.streams[0] || new MediaStream([e.track]);
       c.vid.hidden = false;
@@ -727,8 +797,10 @@
     pc.onconnectionstatechange = () => {
       if (MP[k] && MP[k].pc !== pc) return;
       if (pc.connectionState === "connected") {
-        c.live = true;
-        c.cx.canvas.style.visibility = "hidden";
+        if (USE_VIDEO) {
+          c.live = true;
+          c.cx.canvas.style.visibility = "hidden";
+        }
       } else if (
         pc.connectionState === "failed" ||
         pc.connectionState === "closed"
@@ -758,6 +830,38 @@
     } catch (e) {
       if (MP[k] && MP[k].pc === pc) closePeer(k);
     }
+  }
+  /* Mode hemat data: terima keadaan game dari pemain, gambar ulang di canvas Room Master (60 fps) */
+  function onDC(k, c, pc, ch) {
+    ch.binaryType = "arraybuffer";
+    let n = 0,
+      t0 = 0;
+    ch.onmessage = async (e) => {
+      if (!MP[k] || MP[k].pc !== pc) return;
+      let o, sn = null;
+      try {
+        o = await unpack(e.data);
+        sn = core().cleanSnap(o.s);
+      } catch (er) {
+        return;
+      }
+      if (!sn || typeof o.q !== "number" || o.q <= c.dseq) return; // frame lama/tiba terlambat: buang
+      c.dseq = o.q;
+      c.dc = true;
+      HV[k] = { snap: sn, t: 0, at: performance.now(), pt: 0 };
+      const now = performance.now();
+      if (!t0) t0 = now;
+      n++;
+      if (now - t0 >= 1000) {
+        const hz = Math.round((n * 1000) / (now - t0));
+        n = t0 = 0;
+        setT(c.hf, "DATA " + hz + "/dtk");
+        c.hf.className = "hf " + (hz >= 8 ? "ok" : hz >= 4 ? "mid" : "bad");
+      }
+    };
+    ch.onclose = () => {
+      if (MP[k] && MP[k].pc === pc) closePeer(k);
+    };
   }
   /* fps video yang benar-benar diterima & ditampilkan (bukan perkiraan) */
   function watchFps(c, k) {
@@ -985,7 +1089,7 @@
     if (v.status !== "playing") return;
     v.players.forEach((p, k) => {
       const s = p.stats;
-      if (!s || !s.snap) return;
+      if (!s || !s.snap || (HC[k] && HC[k].dc)) return;
       const cur = HV[k];
       if (cur && cur.t >= s.t) return;
       HV[k] = { snap: s.snap, t: s.t, at: performance.now(), pt: 0 };
@@ -1115,7 +1219,7 @@
   };
   /* Tayangan cadangan Room Master digambar 24 fps (diatur dengan pewaktu akumulator supaya tetap rata-rata 24 di layar 120/144 Hz)
    dan fps yang benar-benar tergambar ditampilkan di #hfps. */
-  const HFPS = 24,
+  const HFPS = USE_VIDEO ? 24 : 60,
     HSTEP = 1000 / HFPS;
   let hnext = 0,
     fpsT = 0,

@@ -1,4 +1,4 @@
-/* Kebun Angka Online: aturan bersama (dipakai SERVER untuk menyaring & menghitung papan skor, dan KLIEN untuk tampilan).
+/* FloraBite Online: aturan bersama (dipakai SERVER untuk menyaring & menghitung papan skor, dan KLIEN untuk tampilan).
    Permainan berjalan di perangkat tiap pemain; server memegang seed gelombang, status ruangan, dan papan skor akhir. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();

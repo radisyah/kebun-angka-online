@@ -1,6 +1,6 @@
-# Kebun Angka: Zombie Hitung — Online (2–4 pemain) untuk Vercel
+# FloraBite — Online (2–4 pemain) untuk Vercel
 
-Versi online *Kebun Angka*, dengan cara kerja yang sama seperti **angry-birds-online**:
+Versi online *FloraBite*, dengan cara kerja yang sama seperti **angry-birds-online**:
 kode ruangan 5 karakter, token sesi di `localStorage`, polling ke satu Vercel Function (`/api/room`), dan state di **Upstash Redis**.
 Server LAN lama (`server.js` + SSE) tidak dipakai lagi karena Vercel tidak bisa menahan koneksi terbuka.
 
@@ -16,6 +16,7 @@ Room Master ────┼─ polling ─ /api/room ───┤
 ## Alur
 - **Buat Ruangan** (pembuat = Pemain 1 & pemilik) atau **Jadi Room Master** (hanya memantau, tidak bermain). Teman bergabung dengan kode / *Salin Tautan* (`?room=KODE`).
 - 2–4 pemain (dulu wajib tepat 4). Pemain menekan **SIAP**; pemilik (Room Master bila ada, kalau tidak Pemain 1) menekan **MULAI**.
+- **Mode hemat data (default, `USE_VIDEO=false` di `online.js`):** pemain tidak mengirim video, hanya keadaan game (JSON terkompresi, ±12×/dtk, ±5–10 KB/dtk) lewat WebRTC DataChannel tanpa retransmisi; Room Master menggambar ulang layar tiap pemain sendiri di 60 fps. Isi `USE_VIDEO=true` untuk kembali ke video 360p di bawah.
 - Saat bermain, tiap pemain mengirim skor & gelombang tiap ±1 detik, dan **layar gamenya dikirim sebagai video langsung 360p / 24 fps ke Room Master lewat WebRTC**
   (`canvas.captureStream(24)`, tinggi dibatasi 360 px, ≤800 kbps, `maintain-framerate` → bila jaringan lambat, resolusi yang turun dulu, bukan fps). Server hanya menukar sinyal SDP sekali per koneksi
   (aksi `sig`), videonya tidak lewat Vercel/Redis. Lencana di tiap kotak (mis. "VIDEO 24 FPS") menunjukkan fps video yang benar-benar diterima.
