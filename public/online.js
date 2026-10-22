@@ -515,12 +515,13 @@
     }
   };
 
-  /* ---------- video langsung 360p 30 fps: pemain -> Room Master lewat WebRTC (peer-to-peer) ----------
+  /* ---------- video langsung 360p 24 fps: pemain -> Room Master lewat WebRTC (peer-to-peer) ----------
    Server (Vercel/Redis) hanya dipakai untuk bertukar sinyal SDP satu kali; videonya tidak lewat server.
    Bila WebRTC gagal (jaringan memblokir P2P tanpa TURN), Room Master otomatis memakai cuplikan seperti sebelumnya.
    Jaringan ketat (sekolah/seluler) dilayani server TURN Metered lewat /api/turn. */
-  /* Video Room Master: 360p @ 30 fps (hemat CPU/jaringan, 4 video sekaligus tetap mulus) */
-  const VID_H = 360, VID_FPS = 30, VID_BPS = 8e5;
+  /* Video Room Master: 360p @ 24 fps, DIKUNCI (hemat CPU/jaringan, 4 video sekaligus tetap mulus) */
+  const VID_H = 360, VID_FPS = 24, VID_BPS = 8e5;
+  const FPS_OK = 21, FPS_MID = 14; // ambang lencana hijau / kuning (24 fps target)
   const STUN_ONLY = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
@@ -620,7 +621,7 @@
         pc.addTrack(t, stream);
       });
       try {
-        // 360p @ 30 fps: resolusi dibatasi, fps dipertahankan (resolusi yang turun lebih dulu bila jaringan lambat)
+        // 360p @ 24 fps: resolusi dibatasi, fps dipertahankan (resolusi yang turun lebih dulu bila jaringan lambat)
         const sd = pc.getSenders()[0],
           pr = sd.getParameters();
         if (!pr.encodings || !pr.encodings.length) pr.encodings = [{}];
@@ -775,7 +776,7 @@
         t0 = now;
         setT(c.hf, "VIDEO " + c.fps + " FPS");
         c.hf.className =
-          "hf " + (c.fps >= 26 ? "ok" : c.fps >= 15 ? "mid" : "bad");
+          "hf " + (c.fps >= FPS_OK ? "ok" : c.fps >= FPS_MID ? "mid" : "bad");
       }
       v.requestVideoFrameCallback(cb);
     };
@@ -1112,9 +1113,9 @@
       handleErr(e);
     }
   };
-  /* Tayangan cadangan Room Master digambar 30 fps (diatur dengan pewaktu akumulator supaya tetap rata-rata 30 di layar 120/144 Hz)
+  /* Tayangan cadangan Room Master digambar 24 fps (diatur dengan pewaktu akumulator supaya tetap rata-rata 24 di layar 120/144 Hz)
    dan fps yang benar-benar tergambar ditampilkan di #hfps. */
-  const HFPS = 30,
+  const HFPS = 24,
     HSTEP = 1000 / HFPS;
   let hnext = 0,
     fpsT = 0,
@@ -1151,7 +1152,7 @@
       fpsEl = fpsEl || $$("hfps");
       if (fpsEl) {
         setT(fpsEl, (lv.length ? "VIDEO " : "") + f + " FPS");
-        fpsEl.className = f >= 26 ? "ok" : f >= 15 ? "mid" : "bad";
+        fpsEl.className = f >= FPS_OK ? "ok" : f >= FPS_MID ? "mid" : "bad";
       }
     }
     requestAnimationFrame(hostRender);

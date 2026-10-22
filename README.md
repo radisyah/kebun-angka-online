@@ -16,13 +16,13 @@ Room Master ────┼─ polling ─ /api/room ───┤
 ## Alur
 - **Buat Ruangan** (pembuat = Pemain 1 & pemilik) atau **Jadi Room Master** (hanya memantau, tidak bermain). Teman bergabung dengan kode / *Salin Tautan* (`?room=KODE`).
 - 2–4 pemain (dulu wajib tepat 4). Pemain menekan **SIAP**; pemilik (Room Master bila ada, kalau tidak Pemain 1) menekan **MULAI**.
-- Saat bermain, tiap pemain mengirim skor & gelombang tiap ±1 detik, dan **layar gamenya dikirim sebagai video langsung 360p / 30 fps ke Room Master lewat WebRTC**
-  (`canvas.captureStream(30)`, tinggi dibatasi 360 px, ≤800 kbps, `maintain-framerate` → bila jaringan lambat, resolusi yang turun dulu, bukan fps). Server hanya menukar sinyal SDP sekali per koneksi
-  (aksi `sig`), videonya tidak lewat Vercel/Redis. Lencana di tiap kotak (mis. "VIDEO 30 FPS") menunjukkan fps video yang benar-benar diterima.
+- Saat bermain, tiap pemain mengirim skor & gelombang tiap ±1 detik, dan **layar gamenya dikirim sebagai video langsung 360p / 24 fps ke Room Master lewat WebRTC**
+  (`canvas.captureStream(24)`, tinggi dibatasi 360 px, ≤800 kbps, `maintain-framerate` → bila jaringan lambat, resolusi yang turun dulu, bukan fps). Server hanya menukar sinyal SDP sekali per koneksi
+  (aksi `sig`), videonya tidak lewat Vercel/Redis. Lencana di tiap kotak (mis. "VIDEO 24 FPS") menunjukkan fps video yang benar-benar diterima.
 - **Server TURN (Metered)** supaya video sampai dari jaringan apa pun (sekolah, seluler/CGNAT, kantor): klien meminta daftar ICE ke `/api/turn`
   (hanya anggota ruangan yang sah), fungsi itu mengambil kredensial dari Metered memakai API key yang tersimpan di environment Vercel (tidak pernah dikirim ke browser), lalu di-cache 5 menit.
   Bila Metered belum diisi / gagal, otomatis memakai STUN saja.
-- **Cadangan otomatis:** bila WebRTC tetap tidak tersambung, kotak itu kembali memakai cuplikan ±1 dtk + perkiraan gerakan
+- **Cadangan otomatis:** bila WebRTC tetap tidak tersambung, kotak itu kembali memakai cuplikan ±1 dtk + perkiraan gerakan (digambar 24 fps)
   (lencana "Cuplikan"). Pemain mencoba menawarkan ulang tiap 9 dtk (maks. 8×).
 Room Master bisa **Hentikan**.
 - Semua selesai → papan skor. Pemilik menekan **Main lagi** (kembali ke lobi, seed baru).
