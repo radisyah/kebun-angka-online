@@ -4,7 +4,7 @@ Jalankan ulang setiap kali kode gambar di index.html diubah:  python3 tools/buil
 import re, os
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(os.path.join(root, 'public/index.html'), encoding='utf-8').read()
-tail = open(os.path.join(root, 'tools/render-worker.tail.js'), encoding='utf-8').read()
+tail = open(os.path.join(root, 'tools/render-cache.js'), encoding='utf-8').read() + open(os.path.join(root, 'tools/render-worker.tail.js'), encoding='utf-8').read()
 a = src.index('const $ = (id) => document.getElementById(id);')
 e = src.index('function loop(t) {')
 body = src[a:e]
