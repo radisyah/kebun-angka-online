@@ -523,7 +523,7 @@
   const VID_H = 360, VID_FPS = 24, VID_BPS = 8e5;
   /* MODE HEMAT DATA (default): pemain TIDAK mengirim video, hanya keadaan game (JSON terkompresi, ±5–10 KB/dtk)
      lewat WebRTC DataChannel; Room Master menggambar ulang sendiri di 60 fps. USE_VIDEO=true -> kembali ke video 360p lama. */
-  const USE_VIDEO = false, SNAP_HZ = 12;
+  const USE_VIDEO = false, SNAP_HZ = 30; // 30×/dtk ≈ 20 KB/dtk per pemain (terkompresi), tembakan & zombie tampak sinkron
   /* Room Master: tiap layar pemain digambar oleh Web Worker + OffscreenCanvas sendiri (render-worker.js) -> memakai beberapa inti CPU
      & GPU laptop secara paralel, sehingga 60 fps tetap lancar. Bila browser tidak mendukung / worker gagal: otomatis pakai cara lama. */
   const CAN_WORKER =
@@ -764,7 +764,8 @@
         c.vid.srcObject = null;
         c.vid.hidden = true;
       }
-      c.cx.canvas.style.visibility = "";
+      const cvEl = c.d && c.d.querySelector("canvas"); // layar yang digambar worker tidak punya c.cx
+      if (cvEl) cvEl.style.visibility = "";
       setT(c.hf, "Cuplikan");
       c.hf.className = "hf";
     }
@@ -805,7 +806,8 @@
       if (pc.connectionState === "connected") {
         if (USE_VIDEO) {
           c.live = true;
-          c.cx.canvas.style.visibility = "hidden";
+          const cvEl = c.d && c.d.querySelector("canvas");
+          if (cvEl) cvEl.style.visibility = "hidden";
         }
       } else if (
         pc.connectionState === "failed" ||
@@ -862,7 +864,7 @@
         const hz = Math.round((n * 1000) / (now - t0));
         n = t0 = 0;
         setT(c.hf, "DATA " + hz + "/dtk");
-        c.hf.className = "hf " + (hz >= 8 ? "ok" : hz >= 4 ? "mid" : "bad");
+        c.hf.className = "hf " + (hz >= SNAP_HZ * 0.6 ? "ok" : hz >= SNAP_HZ * 0.3 ? "mid" : "bad");
       }
     };
     ch.onclose = () => {

@@ -57,6 +57,11 @@ try:
         M.wait_for_timeout(1500)
         painted = M.evaluate("""(()=>{const c=document.querySelector('#hg canvas');const t=document.createElement('canvas');t.width=c.width;t.height=c.height;const x=t.getContext('2d');x.drawImage(c,0,0);const d=x.getImageData(0,0,c.width,c.height).data;const seen=new Set();for(let i=0;i<d.length;i+=4*97)seen.add(d[i]+','+d[i+1]+','+d[i+2]);return seen.size})()""")
         check('layar pemain tergambar di Room Master (canvas bukan kosong)', painted > 12, painted)
+        try:
+            M.wait_for_function("[...document.querySelectorAll('#hg .hf')].filter(e=>e.innerText.startsWith('DATA')).length>=2", timeout=15000)
+            check('Room Master menerima data lewat DataChannel (lencana DATA) dari kedua pemain', True)
+        except Exception as ex:
+            check('Room Master menerima data lewat DataChannel (lencana DATA) dari kedua pemain', False, M.evaluate("[...document.querySelectorAll('#hg .hf')].map(e=>e.innerText)"))
         M.screenshot(path=SHOTS + '/2-master-grid.png'); A.screenshot(path=SHOTS + '/2-player-game.png')
 
         A.evaluate("over(true)"); B.evaluate("over(false)")
