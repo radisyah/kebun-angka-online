@@ -1034,17 +1034,20 @@
       const d = document.createElement("div");
       d.className = "hc";
       d.innerHTML =
-        '<div class="hb"><b></b><i class="hf">Cuplikan</i><span></span></div><div class="hw"><canvas></canvas><video muted playsinline autoplay hidden></video><div class="ho"></div></div>';
+        '<div class="hb"><b></b><i class="hf">Cuplikan</i><span></span><em class="zb">🔍 Zoom</em></div><div class="hw"><canvas></canvas><video muted playsinline autoplay hidden></video><div class="ho"></div></div>';
       const cvs = d.querySelector("canvas");
       cvs.width = HW;
       cvs.height = HH;
-      const cx = cvs.getContext("2d");
+      const cx = cvs.getContext("2d", { alpha: false }); // tanpa transparansi: komposit lebih ringan
       cx.fillStyle = "#0e130b";
       cx.fillRect(0, 0, HW, HH);
       HC[k] = {
         lab: d.querySelector("b"),
         chip: d.querySelector(".hb span"),
         hf: d.querySelector(".hf"),
+        zb: d.querySelector(".zb"),
+        d,
+        hs: HS,
         vid: d.querySelector("video"),
         ov: d.querySelector(".ho"),
         cx,
@@ -1052,10 +1055,49 @@
         fps: 0,
         wf: 0,
       };
+      d.onclick = () => zoomCell(ZK === k ? -1 : k);
       gr.appendChild(d);
     }
+    ZK = -1;
     hostBuilt = true;
   }
+  /* Zoom: klik kotak pemain (atau tombol 1–4) untuk memperbesar; klik lagi / Esc untuk kembali.
+     Kotak yang diperbesar digambar ulang beresolusi lebih tinggi; kotak lain berhenti digambar selama zoom (hemat CPU). */
+  let ZK = -1;
+  function zoomCell(k) {
+    if (!hostBuilt || (k >= 0 && !HC[k])) return;
+    ZK = k;
+    gBad = gGood = 0;
+    for (let i = 0; i < 4; i++) {
+      const c = HC[i];
+      c.d.classList.toggle("zoom", i === k);
+      setT(c.zb, i === k ? "✕ Tutup" : "🔍 Zoom");
+    }
+    requestAnimationFrame(() => {
+      for (let i = 0; i < 4; i++) {
+        const c = HC[i],
+          cs = c.cx.canvas;
+        let hs = hsc;
+        if (i === k) {
+          const r = cs.getBoundingClientRect(),
+            dpr = window.devicePixelRatio || 1;
+          hs = Math.min(1.5, Math.max(hsc, Math.min(r.width / W, r.height / H) * dpr));
+        }
+        c.hs = hs;
+        cs.width = Math.round(W * hs);
+        cs.height = Math.round(H * hs);
+        if (HV[i]) HV[i].pt = 0; // paksa gambar ulang
+      }
+    });
+  }
+  window.addEventListener("resize", () => {
+    if (ZK >= 0) zoomCell(ZK);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!hostBuilt || $$("host").hidden || /INPUT|TEXTAREA/.test((e.target || {}).tagName || "")) return;
+    if (e.key === "Escape") zoomCell(-1);
+    else if (/^[1-4]$/.test(e.key)) zoomCell(ZK === +e.key - 1 ? -1 : +e.key - 1);
+  });
   function enterHostMode() {
     mute = true;
     Music.go(null);
@@ -1076,7 +1118,7 @@
       if (!c) continue;
       c.cx.setTransform(1, 0, 0, 1, 0, 0);
       c.cx.fillStyle = "#0e130b";
-      c.cx.fillRect(0, 0, HW, HH);
+      c.cx.fillRect(0, 0, c.cx.canvas.width, c.cx.canvas.height);
     }
   }
   function feedSnaps(v) {
@@ -1219,31 +1261,83 @@
   };
   /* Tayangan cadangan Room Master digambar 24 fps (diatur dengan pewaktu akumulator supaya tetap rata-rata 24 di layar 120/144 Hz)
    dan fps yang benar-benar tergambar ditampilkan di #hfps. */
-  const HFPS = USE_VIDEO ? 24 : 60,
-    HSTEP = 1000 / HFPS;
-  let hnext = 0,
+  /* Pengatur beban otomatis (Room Master): menjaga fps tiap pemain ±30.
+     Bila laptop kewalahan, turun bertahap: resolusi gambar 0.7 -> 0.62 (±360p), lalu fps per pemain 30 -> 24 -> 20 -> 15.
+     Bila sudah longgar beberapa detik, naik lagi. Gambar tiap pemain digilir (paling banyak 2 per frame) agar beban merata. */
+  const LV = [[HS, 30], [0.62, 30], [0.62, 24], [0.62, 20], [0.62, 15]]; // [skala gambar, fps per pemain]
+  let lvl = 0,
+    hsc = LV[0][0],
+    hz = LV[0][1],
+    gBad = 0,
+    gGood = 0,
+    gN = 0,
+    gMs = 0,
     fpsT = 0,
-    fpsN = 0,
     fpsEl = null;
+  function applyLevel() {
+    hsc = LV[lvl][0];
+    hz = LV[lvl][1];
+    for (let k = 0; k < 4; k++) {
+      const c = HC[k];
+      if (!c || k === ZK || c.hs === hsc) continue;
+      c.hs = hsc;
+      c.cx.canvas.width = Math.round(W * hsc);
+      c.cx.canvas.height = Math.round(H * hsc);
+      if (HV[k]) HV[k].pt = 0;
+    }
+  }
   function hostRender(now) {
-    if (!hnext || now - hnext > 250) hnext = now; // awal / setelah tab disembunyikan: mulai ulang pewaktu
-    if (now >= hnext - 1) {
-      hnext += HSTEP;
-      if (now > hnext) hnext = now + HSTEP; // tidak menumpuk frame yang terlewat
-      for (let k = 0; k < 4; k++) {
-        const h = HV[k];
-        if (h && !HC[k].live) {
-          try {
-            paintHost(HC[k], h, now);
-          } catch (e) {}
-        }
-      }
-      fpsN++;
+    const zoomed = ZK >= 0,
+      tgt = zoomed ? Math.min(60, hz * 2) : hz,
+      step = 1000 / tgt,
+      due = [];
+    let act = 0;
+    for (let k = 0; k < 4; k++) {
+      const h = HV[k],
+        c = HC[k];
+      if (!h || !c || c.live || (zoomed && ZK !== k)) continue;
+      act++;
+      if (c.nx === undefined || now - c.nx > 250) c.nx = now + (k * step) / 4; // awal / setelah tab disembunyikan: sebar waktunya
+      if (now >= c.nx - 1) due.push(c);
+    }
+    due.sort((a, b) => a.nx - b.nx);
+    for (let i = 0; i < due.length && i < 2; i++) {
+      const c = due[i],
+        k = +Object.keys(HC).find((x) => HC[x] === c),
+        t0 = performance.now();
+      c.nx += step;
+      if (now > c.nx) c.nx = now + step; // tidak menumpuk frame yang terlewat
+      try {
+        paintHost(c, HV[k], now);
+      } catch (e) {}
+      gMs += performance.now() - t0;
+      gN++;
     }
     if (!fpsT) fpsT = now;
-    if (now - fpsT >= 500) {
-      let f = Math.round((fpsN * 1000) / (now - fpsT));
-      fpsN = 0;
+    const dt = now - fpsT;
+    if (dt >= 500) {
+      let f = act ? Math.round((gN * 1000) / dt / act) : 0;
+      const busy = gMs / dt; // porsi waktu yang dipakai untuk menggambar
+      if (act && dt < 1500) {
+        if (f < tgt * 0.85) {
+          gBad++;
+          gGood = 0;
+        } else if (f >= tgt * 0.95 && busy < 0.5) {
+          gGood++;
+          gBad = 0;
+        } else gGood = gBad = 0;
+        if (gBad >= 3 && lvl < LV.length - 1) {
+          lvl++;
+          applyLevel();
+          gBad = 0;
+        } else if (gGood >= 12 && lvl > 0) {
+          lvl--;
+          applyLevel();
+          gGood = 0;
+        }
+      }
+      gN = 0;
+      gMs = 0;
       fpsT = now;
       const lv = [0, 1, 2, 3]
         .map((k) => HC[k])
@@ -1255,8 +1349,9 @@
         ); // ada video langsung: tampilkan fps video terendah
       fpsEl = fpsEl || $$("hfps");
       if (fpsEl) {
-        setT(fpsEl, (lv.length ? "VIDEO " : "") + f + " FPS");
-        fpsEl.className = f >= FPS_OK ? "ok" : f >= FPS_MID ? "mid" : "bad";
+        setT(fpsEl, (lv.length ? "VIDEO " : "") + f + " FPS" + (lvl ? " ·hemat" + lvl : ""));
+        const r = lv.length ? f / VID_FPS : f / tgt;
+        fpsEl.className = r >= 0.85 ? "ok" : r >= 0.6 ? "mid" : "bad";
       }
     }
     requestAnimationFrame(hostRender);
@@ -1290,7 +1385,7 @@
     S = view;
     hover = null;
     try {
-      g.setTransform(HS, 0, 0, HS, 0, 0);
+      g.setTransform(c.hs || HS, 0, 0, c.hs || HS, 0, 0);
       drawO();
       info();
       frost();
