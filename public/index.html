@@ -4738,14 +4738,26 @@
       .hb .hf { font: 700 11px "Oswald", monospace; font-style: normal; padding: 1px 8px; border-radius: 99px; background: rgba(0,0,0,.45); color: #cfd8c4; margin: 0 8px; }
       .hb .hf.ok { color: #7dff8a; } .hb .hf.mid { color: #ffd45a; } .hb .hf.bad { color: #ff7a6a; }
       .hw video { background: #0e130b; }
-      #hz { background: linear-gradient(#d9ceb2, #b7a984); color: var(--dark); border: 3px solid var(--dark); border-radius: 10px; padding: 4px 10px 6px; }
-      #hz[hidden] { display: none; }
-      #hzh { display: flex; align-items: center; gap: 12px; }
-      #hzt { font: 800 17px "Cinzel", "Trebuchet MS", sans-serif; white-space: nowrap; }
-      #hzs { flex: 1; font-weight: 700; font-size: 13px; }
-      #hzl { display: flex; gap: 6px; overflow-x: auto; padding: 4px 2px 2px; }
-      #hzl .zi { flex: 0 0 76px; }
-      #hz.min #hzl { display: none; }
+      .ho { white-space: pre-line; line-height: 1.25; }
+      .hp { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(94%, 560px); max-height: 96%; overflow: hidden; background: linear-gradient(#f4ead0, #d9ceb2); border: 3px solid var(--dark); border-radius: 12px; padding: 6px 8px 8px; text-align: center; color: var(--dark); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); }
+      .hp[hidden] { display: none; }
+      .hpt { display: block; font: 800 clamp(14px, 1.8vw, 22px) "Cinzel", "Trebuchet MS", sans-serif; }
+      .hpc { display: block; font-weight: 700; font-size: clamp(10px, 1.1vw, 13px); margin: 2px 0 4px; }
+      .hpl { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
+      .hp .zi { flex: 0 0 58px; padding: 1px; }
+      .hp .zi canvas { position: static; inset: auto; object-fit: fill; width: 34px; height: 44px; }
+      .hp .zi b { font-size: 15px; }
+      .hp .zi small { font-size: 9px; }
+      .hc.zoom .hp { width: min(90%, 900px); }
+      .hc.zoom .hpt { font-size: 28px; }
+      .hc.zoom .hpc { font-size: 15px; }
+      .hc.zoom .hp .zi { flex: 0 0 84px; }
+      .hc.zoom .hp .zi canvas { width: 50px; height: 64px; }
+      .hc.zoom .hp .zi b { font-size: 22px; }
+      .hc.zoom .hp .zi small { font-size: 12px; }
+      .hc.fin .hw { background: #000; }
+      .hc.fin .hw canvas, .hc.fin .hw video { visibility: hidden !important; }
+      .hc.fin .ho { background: #000; font-size: clamp(24px, 4.2vw, 48px); }
       .hc { cursor: zoom-in; }
       .hc .hw canvas, .hc .hw video { cursor: inherit; }
       .hb .zb { font: 700 11px "Oswald", sans-serif; font-style: normal; opacity: .75; white-space: nowrap; align-self: center; }
@@ -4794,10 +4806,6 @@
         <button class="lbtn sm" id="hlv">Keluar</button>
       </div>
       <div id="hr" hidden></div>
-      <div id="hz" hidden>
-        <div id="hzh"><b id="hzt"></b><span id="hzs"></span><button class="lbtn sm" id="hzx">Sembunyikan</button></div>
-        <div id="hzl"></div>
-      </div>
       <div id="hg"></div>
     </div>
     <div id="olt"></div>

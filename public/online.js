@@ -648,8 +648,14 @@
     ch.binaryType = "arraybuffer";
     ch.onopen = () => {
       clearInterval(dcT);
+      let endN = 0;
       dcT = setInterval(async () => {
         if (!playing || !S || pdc !== ch || ch.readyState !== "open") return;
+        if (!S.run && ++endN > 4) {
+          clearInterval(dcT); // game selesai: hentikan pengiriman (4 frame "selesai" sudah terkirim)
+          dcT = 0;
+          return;
+        }
         if (ch.bufferedAmount > 12000) return; // jaringan macet: lewati frame ini
         try {
           ch.send(await pack({ q: ++dcSeq, s: mk() }));
@@ -745,7 +751,7 @@
     !!V &&
     V.side === "master" &&
     V.status === "playing" &&
-    V.players.some((p, k) => !p.done && !p.left && !(HC[k] && (HC[k].live || HC[k].dc)));
+    V.players.some((p, k) => !p.done && !p.left && !(HC[k] && (HC[k].live || HC[k].dc || HC[k].fin)));
   function closePeer(k) {
     const m = MP[k];
     if (m) {
@@ -774,6 +780,7 @@
   function onSigs(sig) {
     if (!V || V.side !== "master" || V.status !== "playing") return;
     Object.keys(sig).forEach((k) => {
+      if (HC[k] && HC[k].fin) return;
       const m = sig[k];
       if (m && m.type === "offer" && m.g === V.gameNo && MSEEN[k] !== m.id) {
         MSEEN[k] = m.id;
@@ -845,7 +852,7 @@
     let n = 0,
       t0 = 0;
     ch.onmessage = async (e) => {
-      if (!MP[k] || MP[k].pc !== pc) return;
+      if (c.fin || !MP[k] || MP[k].pc !== pc) return;
       let o, sn = null;
       try {
         o = await unpack(e.data);
@@ -854,9 +861,12 @@
         return;
       }
       if (!sn || typeof o.q !== "number" || o.q <= c.dseq) return; // frame lama/tiba terlambat: buang
-      noteWL(sn);
       c.dseq = o.q;
       c.dc = true;
+      if (sn.run === false) {
+        finishCell(k, sn.score, sn.w); // pemain selesai: langsung hentikan & hitamkan
+        return;
+      }
       HV[k] = { snap: sn, t: 0, at: performance.now(), pt: 0 };
       const now = performance.now();
       if (!t0) t0 = now;
@@ -936,7 +946,7 @@
       t: S.t,
       w: S.w,
       phase: S.phase,
-      wl: S.phase === "break" && S.wl ? S.wl.map((q) => ({ lane: q.lane, n: q.n, type: q.type })) : undefined, // info zombie gelombang (hanya saat jeda)
+      wl: S.run && S.wl && !$$("pop").hidden ? S.wl.map((q) => ({ lane: q.lane, n: q.n, type: q.type })) : undefined, // info zombie: hanya selama popup "Gelombang N" terlihat di layar pemain
       bt: S.bt,
       score: S.score,
       mowers: S.mowers,
@@ -1037,64 +1047,78 @@
     HW = 700,
     HH = Math.round(H * HS),
     CAP = 1.5;
-  /* Info zombie per gelombang di Room Master (sama dengan popup "Gelombang N" di layar pemain).
-     Seed sama -> daftar zombie sama untuk semua pemain, jadi cukup satu panel bersama yang menampilkan gelombang terbaru. */
-  const WL = {};
-  let wlShown = 0,
-    wlHidden = 0;
-  function noteWL(sn) {
-    if (sn && Array.isArray(sn.wl) && sn.w && !WL[sn.w] && sn.wl.length)
-      WL[sn.w] = sn.wl.slice(0, 40).map((q) => ({ lane: (+q.lane | 0) % 5, n: +q.n | 0, type: String(q.type) }));
-  }
-  function renderInfo(w) {
-    const list = WL[w],
-      box = $$("hzl");
-    box.innerHTML = "";
-    setT($$("hzt"), "Info zombie · Gelombang " + w + " dari " + core().MAXW);
-    setT($$("hzs"), list.length + " zombie akan lewat. Angka merah (negatif) perlu tanaman + atau × −1.");
-    const sS = S;
-    S = { t: 0 }; // gambar ikon zombie membaca S.t
-    try {
-      list.forEach((q) => {
-        const d = document.createElement("div"),
-          c = document.createElement("canvas"),
-          b = document.createElement("b"),
-          m = document.createElement("small");
-        d.className = "zi";
-        c.width = 70;
-        c.height = 90;
-        b.textContent = String(q.n).replace("-", "−");
-        if (q.n < 0) b.className = "ng";
-        m.textContent = "J" + (q.lane + 1) + " · " + (ZN[q.type] || "Zombie");
-        d.appendChild(c);
-        d.appendChild(b);
-        d.appendChild(m);
-        box.appendChild(d);
-        try {
-          zicon(c, q);
-        } catch (e) {}
-      });
-    } finally {
-      S = sS;
-    }
-  }
-  function updateInfo() {
-    const box = $$("hz"),
-      ws = Object.keys(WL).map(Number);
-    if (!box) return;
-    if (!ws.length) {
-      box.hidden = true;
+  /* Info zombie per gelombang DI DALAM kotak tiap pemain: cermin popup "Gelombang N" di layar pemain (muncul/hilang realtime). */
+  function popSync(c, h) {
+    const sn = h && h.snap,
+      raw = !c.fin && sn && sn.run !== false && Array.isArray(sn.wl) ? sn.wl.slice(0, 40) : [];
+    if (!raw.length) {
+      if (!c.hp.hidden) c.hp.hidden = true;
+      c.pk = "";
       return;
     }
-    const w = Math.max.apply(null, ws);
-    if (w !== wlShown) {
-      wlShown = w;
-      wlHidden = 0; // gelombang baru: tampil lagi
-      renderInfo(w);
+    const list = raw.map((q) => ({ lane: (+q.lane | 0) % 5, n: +q.n | 0, type: String(q.type) })),
+      key = sn.w + ":" + list.map((q) => q.lane + "," + q.n + "," + q.type).join(";");
+    if (key !== c.pk) {
+      c.pk = key;
+      const box = c.hp.querySelector(".hpl"),
+        sS = S;
+      box.innerHTML = "";
+      setT(c.hp.querySelector(".hpt"), "Gelombang " + sn.w + " dari " + core().MAXW);
+      setT(c.hp.querySelector(".hpc"), list.length + " zombie akan lewat. Zombie bernegatif (angka merah) perlu tanaman + atau × −1.");
+      S = { t: 0 }; // gambar ikon zombie membaca S.t
+      try {
+        list.forEach((q) => {
+          const d = document.createElement("div"),
+            cv = document.createElement("canvas"),
+            b = document.createElement("b"),
+            m = document.createElement("small");
+          d.className = "zi";
+          cv.width = 70;
+          cv.height = 90;
+          b.textContent = String(q.n).replace("-", "−");
+          if (q.n < 0) b.className = "ng";
+          m.textContent = "J" + (q.lane + 1) + " · " + (ZN[q.type] || "Zombie");
+          d.appendChild(cv);
+          d.appendChild(b);
+          d.appendChild(m);
+          box.appendChild(d);
+          try {
+            zicon(cv, q);
+          } catch (e) {}
+        });
+      } finally {
+        S = sS;
+      }
     }
-    box.hidden = false;
-    box.classList.toggle("min", !!wlHidden);
-    setT($$("hzx"), wlHidden ? "Tampilkan" : "Sembunyikan");
+    if (c.hp.hidden) c.hp.hidden = false;
+  }
+  /* Pemain selesai: hentikan pengambilan gameplay (tutup koneksi & berhenti menggambar), kotak jadi hitam + "Selesai" & skor. */
+  function finishCell(k, score, wave) {
+    k = +k; // dari jalur DataChannel k berupa teks: jangan sampai "0"+1 = "01"
+    const c = HC[k];
+    if (!c || c.fin) return;
+    c.fin = true;
+    c.fs = { score: +score || 0, wave: +wave || 0 };
+    c.d.classList.add("fin");
+    c.hp.hidden = true;
+    c.pk = "";
+    if (c.w) {
+      c.sent = null;
+      c.w.postMessage({ t: "clear" });
+      c.w.postMessage({ t: "pause", v: true });
+    }
+    delete HV[k];
+    closePeer(k);
+    setT(c.hf, "Selesai");
+    c.hf.className = "hf";
+    cellStatus(k);
+  }
+  function unfinCell(c) {
+    if (!c || !c.fin) return;
+    c.fin = false;
+    c.fs = null;
+    c.d.classList.remove("fin");
+    if (c.w) c.w.postMessage({ t: "pause", v: false });
   }
   function mkCx(cvs) {
     const cx = cvs.getContext("2d", { alpha: false }); // tanpa transparansi: komposit lebih ringan
@@ -1123,7 +1147,7 @@
       const d = document.createElement("div");
       d.className = "hc";
       d.innerHTML =
-        '<div class="hb"><b></b><i class="hf">Cuplikan</i><span></span><em class="zb">🔍 Zoom</em></div><div class="hw"><canvas></canvas><video muted playsinline autoplay hidden></video><div class="ho"></div></div>';
+        '<div class="hb"><b></b><i class="hf">Cuplikan</i><span></span><em class="zb">🔍 Zoom</em></div><div class="hw"><canvas></canvas><video muted playsinline autoplay hidden></video><div class="ho"></div><div class="hp" hidden><b class="hpt"></b><span class="hpc"></span><div class="hpl"></div></div></div>';
       const cvs = d.querySelector("canvas");
       cvs.width = HW;
       cvs.height = HH;
@@ -1144,6 +1168,9 @@
         chip: d.querySelector(".hb span"),
         hf: d.querySelector(".hf"),
         zb: d.querySelector(".zb"),
+        hp: d.querySelector(".hp"),
+        pk: "",
+        fin: false,
         d,
         hs: HS,
         vid: d.querySelector("video"),
@@ -1179,7 +1206,7 @@
       const c = HC[i];
       c.d.classList.toggle("zoom", i === k);
       setT(c.zb, i === k ? "✕ Tutup" : "🔍 Zoom");
-      if (c.w) c.w.postMessage({ t: "pause", v: k >= 0 && i !== k }); // layar yang tertutup berhenti digambar
+      if (c.w) c.w.postMessage({ t: "pause", v: !!c.fin || (k >= 0 && i !== k) }); // layar yang tertutup berhenti digambar
     }
     requestAnimationFrame(() => {
       for (let i = 0; i < 4; i++) {
@@ -1219,21 +1246,17 @@
     draw = function () {};
     $$("app").hidden = true;
     $$("ov").hidden = true;
-    $$("hzx").onclick = () => {
-      wlHidden = wlHidden ? 0 : 1;
-      updateInfo();
-    };
     buildHost();
     requestAnimationFrame(hostRender);
   }
   function clearHost() {
-    for (const w in WL) delete WL[w];
-    wlShown = 0;
-    if ($$("hz")) $$("hz").hidden = true;
     for (let k = 0; k < 4; k++) {
       delete HV[k];
       const c = HC[k];
       if (!c) continue;
+      unfinCell(c);
+      c.hp.hidden = true;
+      c.pk = "";
       if (c.w) {
         c.sent = null;
         c.w.postMessage({ t: "clear" });
@@ -1254,8 +1277,7 @@
     if (v.status !== "playing") return;
     v.players.forEach((p, k) => {
       const s = p.stats;
-      if (s && s.snap) noteWL(s.snap);
-      if (!s || !s.snap || (HC[k] && HC[k].dc)) return;
+      if (!s || !s.snap || (HC[k] && (HC[k].dc || HC[k].fin))) return;
       const cur = HV[k];
       if (cur && cur.t >= s.t) return;
       HV[k] = { snap: s.snap, t: s.t, at: performance.now(), pt: 0 };
@@ -1322,6 +1344,8 @@
           .join("  ·  ");
     for (let k = 0; k < 4; k++) cellStatus(k);
   }
+  const finText = (c, head) =>
+    head + "\nSkor " + (c.fs ? c.fs.score : 0) + (c.fs && c.fs.wave ? " · Gel. " + c.fs.wave + "/" + core().MAXW : "");
   function cellStatus(k) {
     const v = V,
       c = HC[k];
@@ -1341,9 +1365,11 @@
           ? "SIAP ✔"
           : "Belum siap"
         : "Terputus";
+      if (c.fin) unfinCell(c);
       ov = h ? "" : chip;
     } else if (v.status === "finished") {
       const r = (v.ranking || []).find((x) => x.name === p.name);
+      if (!c.fin) finishCell(k, r ? r.score : 0, r ? r.wave : 0);
       chip = r
         ? "Selesai · Skor " +
           r.score +
@@ -1351,9 +1377,10 @@
           r.wave +
           (r.win ? " · MENANG" : r.forfeit ? " · keluar" : "")
         : "Selesai";
-      ov = h ? "" : chip;
+      ov = finText(c, r ? "Selesai" : "Selesai") + (r && r.win ? "\nMENANG 🎉" : "");
     } else {
       const s = p.stats;
+      if ((p.done || p.left) && !c.fin) finishCell(k, s ? s.score : h && h.snap ? h.snap.score : 0, s ? s.wave : h && h.snap ? h.snap.w : 0);
       chip = p.left
         ? "Keluar"
         : p.done
@@ -1363,7 +1390,7 @@
         : s
         ? "Skor " + s.score + " · Gel. " + s.wave + "/" + core().MAXW
         : "Memulai…";
-      ov = h ? "" : p.done || p.left ? chip : "Memulai…";
+      ov = c.fin ? finText(c, p.left ? "Keluar" : "Selesai") : h ? "" : "Memulai…";
     }
     setT(c.lab, "Pemain " + (k + 1) + (p ? " · " + p.name : ""));
     setT(c.chip, chip);
@@ -1419,6 +1446,10 @@
     for (let k = 0; k < 4; k++) {
       const h = HV[k],
         c = HC[k];
+      if (c && h !== c.psnap) {
+        c.psnap = h;
+        popSync(c, h); // popup info zombie realtime di kotak pemain
+      }
       if (c && c.w) {
         if (h && c.sent !== h) {
           c.sent = h;
@@ -1470,7 +1501,6 @@
       gN = 0;
       gMs = 0;
       fpsT = now;
-      updateInfo();
       const lv = [0, 1, 2, 3]
         .map((k) => HC[k])
         .filter((c) => c && c.live && c.fps);

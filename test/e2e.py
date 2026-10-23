@@ -63,14 +63,23 @@ try:
         except Exception as ex:
             check('Room Master menerima data lewat DataChannel (lencana DATA) dari kedua pemain', False, M.evaluate("[...document.querySelectorAll('#hg .hf')].map(e=>e.innerText)"))
         try:
-            M.wait_for_function("!document.getElementById('hz').hidden && document.querySelectorAll('#hzl .zi').length>0", timeout=8000)
-            nm, npl = M.evaluate("document.querySelectorAll('#hzl .zi').length"), A.evaluate("S.wl.length")
-            check('Room Master menampilkan info zombie gelombang (jumlah kartu sama dengan layar pemain)', nm == npl, (nm, npl))
+            M.wait_for_function("document.querySelector('#hg .hc:nth-child(1) .hp:not([hidden]) .zi')", timeout=8000)
+            nm, npl = M.evaluate("document.querySelectorAll('#hg .hc:nth-child(1) .hp .zi').length"), A.evaluate("S.wl.length")
+            check('info zombie muncul di dalam kotak Pemain 1 (jumlah kartu sama dengan layar pemain)', nm == npl, (nm, npl))
         except Exception as ex:
-            check('Room Master menampilkan info zombie gelombang', False, str(ex)[:80])
+            check('info zombie muncul di dalam kotak Pemain 1', False, str(ex)[:80])
         M.screenshot(path=SHOTS + '/2-master-grid.png'); A.screenshot(path=SHOTS + '/2-player-game.png')
 
         A.evaluate("over(true)"); B.evaluate("over(false)")
+        try:
+            M.wait_for_function("document.querySelectorAll('#hg .hc.fin').length>=2", timeout=8000)
+            t = M.evaluate("document.querySelector('#hg .hc.fin .ho').innerText")
+            check('pemain selesai: kotak hitam, tertulis Selesai + skor', 'Selesai' in t and 'Skor' in t, t)
+            M.screenshot(path=SHOTS + '/2b-master-fin.png')
+            lb = M.evaluate("[...document.querySelectorAll('#hg .hc .hb b')].slice(0,2).map(e=>e.innerText)")
+            check('judul kotak benar setelah selesai (Pemain 1 / Pemain 2)', lb[0].startswith('Pemain 1 ') and lb[1].startswith('Pemain 2 '), lb)
+        except Exception as ex:
+            check('pemain selesai: kotak hitam, tertulis Selesai + skor', False, str(ex)[:80])
         for pg in (A, B): pg.wait_for_selector('#lrk:not([hidden])', timeout=10000) if False else None
         A.dispatch_event('#go', 'click'); B.dispatch_event('#go', 'click')
         for pg in (A, B): pg.wait_for_selector('#lrk:not([hidden])', timeout=10000)
