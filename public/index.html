@@ -4738,6 +4738,14 @@
       .hb .hf { font: 700 11px "Oswald", monospace; font-style: normal; padding: 1px 8px; border-radius: 99px; background: rgba(0,0,0,.45); color: #cfd8c4; margin: 0 8px; }
       .hb .hf.ok { color: #7dff8a; } .hb .hf.mid { color: #ffd45a; } .hb .hf.bad { color: #ff7a6a; }
       .hw video { background: #0e130b; }
+      #hz { background: linear-gradient(#d9ceb2, #b7a984); color: var(--dark); border: 3px solid var(--dark); border-radius: 10px; padding: 4px 10px 6px; }
+      #hz[hidden] { display: none; }
+      #hzh { display: flex; align-items: center; gap: 12px; }
+      #hzt { font: 800 17px "Cinzel", "Trebuchet MS", sans-serif; white-space: nowrap; }
+      #hzs { flex: 1; font-weight: 700; font-size: 13px; }
+      #hzl { display: flex; gap: 6px; overflow-x: auto; padding: 4px 2px 2px; }
+      #hzl .zi { flex: 0 0 76px; }
+      #hz.min #hzl { display: none; }
       .hc { cursor: zoom-in; }
       .hc .hw canvas, .hc .hw video { cursor: inherit; }
       .hb .zb { font: 700 11px "Oswald", sans-serif; font-style: normal; opacity: .75; white-space: nowrap; align-self: center; }
@@ -4786,6 +4794,10 @@
         <button class="lbtn sm" id="hlv">Keluar</button>
       </div>
       <div id="hr" hidden></div>
+      <div id="hz" hidden>
+        <div id="hzh"><b id="hzt"></b><span id="hzs"></span><button class="lbtn sm" id="hzx">Sembunyikan</button></div>
+        <div id="hzl"></div>
+      </div>
       <div id="hg"></div>
     </div>
     <div id="olt"></div>

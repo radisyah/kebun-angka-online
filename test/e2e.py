@@ -62,6 +62,12 @@ try:
             check('Room Master menerima data lewat DataChannel (lencana DATA) dari kedua pemain', True)
         except Exception as ex:
             check('Room Master menerima data lewat DataChannel (lencana DATA) dari kedua pemain', False, M.evaluate("[...document.querySelectorAll('#hg .hf')].map(e=>e.innerText)"))
+        try:
+            M.wait_for_function("!document.getElementById('hz').hidden && document.querySelectorAll('#hzl .zi').length>0", timeout=8000)
+            nm, npl = M.evaluate("document.querySelectorAll('#hzl .zi').length"), A.evaluate("S.wl.length")
+            check('Room Master menampilkan info zombie gelombang (jumlah kartu sama dengan layar pemain)', nm == npl, (nm, npl))
+        except Exception as ex:
+            check('Room Master menampilkan info zombie gelombang', False, str(ex)[:80])
         M.screenshot(path=SHOTS + '/2-master-grid.png'); A.screenshot(path=SHOTS + '/2-player-game.png')
 
         A.evaluate("over(true)"); B.evaluate("over(false)")

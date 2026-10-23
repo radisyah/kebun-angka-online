@@ -854,6 +854,7 @@
         return;
       }
       if (!sn || typeof o.q !== "number" || o.q <= c.dseq) return; // frame lama/tiba terlambat: buang
+      noteWL(sn);
       c.dseq = o.q;
       c.dc = true;
       HV[k] = { snap: sn, t: 0, at: performance.now(), pt: 0 };
@@ -935,6 +936,7 @@
       t: S.t,
       w: S.w,
       phase: S.phase,
+      wl: S.phase === "break" && S.wl ? S.wl.map((q) => ({ lane: q.lane, n: q.n, type: q.type })) : undefined, // info zombie gelombang (hanya saat jeda)
       bt: S.bt,
       score: S.score,
       mowers: S.mowers,
@@ -1035,6 +1037,65 @@
     HW = 700,
     HH = Math.round(H * HS),
     CAP = 1.5;
+  /* Info zombie per gelombang di Room Master (sama dengan popup "Gelombang N" di layar pemain).
+     Seed sama -> daftar zombie sama untuk semua pemain, jadi cukup satu panel bersama yang menampilkan gelombang terbaru. */
+  const WL = {};
+  let wlShown = 0,
+    wlHidden = 0;
+  function noteWL(sn) {
+    if (sn && Array.isArray(sn.wl) && sn.w && !WL[sn.w] && sn.wl.length)
+      WL[sn.w] = sn.wl.slice(0, 40).map((q) => ({ lane: (+q.lane | 0) % 5, n: +q.n | 0, type: String(q.type) }));
+  }
+  function renderInfo(w) {
+    const list = WL[w],
+      box = $$("hzl");
+    box.innerHTML = "";
+    setT($$("hzt"), "Info zombie · Gelombang " + w + " dari " + core().MAXW);
+    setT($$("hzs"), list.length + " zombie akan lewat. Angka merah (negatif) perlu tanaman + atau × −1.");
+    const sS = S;
+    S = { t: 0 }; // gambar ikon zombie membaca S.t
+    try {
+      list.forEach((q) => {
+        const d = document.createElement("div"),
+          c = document.createElement("canvas"),
+          b = document.createElement("b"),
+          m = document.createElement("small");
+        d.className = "zi";
+        c.width = 70;
+        c.height = 90;
+        b.textContent = String(q.n).replace("-", "−");
+        if (q.n < 0) b.className = "ng";
+        m.textContent = "J" + (q.lane + 1) + " · " + (ZN[q.type] || "Zombie");
+        d.appendChild(c);
+        d.appendChild(b);
+        d.appendChild(m);
+        box.appendChild(d);
+        try {
+          zicon(c, q);
+        } catch (e) {}
+      });
+    } finally {
+      S = sS;
+    }
+  }
+  function updateInfo() {
+    const box = $$("hz"),
+      ws = Object.keys(WL).map(Number);
+    if (!box) return;
+    if (!ws.length) {
+      box.hidden = true;
+      return;
+    }
+    const w = Math.max.apply(null, ws);
+    if (w !== wlShown) {
+      wlShown = w;
+      wlHidden = 0; // gelombang baru: tampil lagi
+      renderInfo(w);
+    }
+    box.hidden = false;
+    box.classList.toggle("min", !!wlHidden);
+    setT($$("hzx"), wlHidden ? "Tampilkan" : "Sembunyikan");
+  }
   function mkCx(cvs) {
     const cx = cvs.getContext("2d", { alpha: false }); // tanpa transparansi: komposit lebih ringan
     cx.fillStyle = "#0e130b";
@@ -1158,10 +1219,17 @@
     draw = function () {};
     $$("app").hidden = true;
     $$("ov").hidden = true;
+    $$("hzx").onclick = () => {
+      wlHidden = wlHidden ? 0 : 1;
+      updateInfo();
+    };
     buildHost();
     requestAnimationFrame(hostRender);
   }
   function clearHost() {
+    for (const w in WL) delete WL[w];
+    wlShown = 0;
+    if ($$("hz")) $$("hz").hidden = true;
     for (let k = 0; k < 4; k++) {
       delete HV[k];
       const c = HC[k];
@@ -1186,6 +1254,7 @@
     if (v.status !== "playing") return;
     v.players.forEach((p, k) => {
       const s = p.stats;
+      if (s && s.snap) noteWL(s.snap);
       if (!s || !s.snap || (HC[k] && HC[k].dc)) return;
       const cur = HV[k];
       if (cur && cur.t >= s.t) return;
@@ -1401,6 +1470,7 @@
       gN = 0;
       gMs = 0;
       fpsT = now;
+      updateInfo();
       const lv = [0, 1, 2, 3]
         .map((k) => HC[k])
         .filter((c) => c && c.live && c.fps);
